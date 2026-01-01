@@ -1,1 +1,7 @@
 /target
+Cargo.lock
+.env
+**/*.rs.bk
+*.csv
+.idea
+.vscode
