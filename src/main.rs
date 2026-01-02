@@ -1,18 +1,20 @@
 use alloy::{
-    primitives::{Address, I256, U256, address}, 
+    primitives::{Address, U256}, 
     providers::{Provider, ProviderBuilder, WsConnect}, 
     rpc::types::Filter, 
     sol, 
     sol_types::SolEvent
 };
-use bigdecimal::{BigDecimal,  FromPrimitive};
+use bigdecimal::{BigDecimal};
 use num_traits::{One, Zero};
 use eyre::Result;
 use futures_util::StreamExt;
 use std::env;
 use std::str::FromStr;
 use std::fs::OpenOptions;
+use std::time::Duration;
 use chrono::Local;
+use tracing::{error, warn, info};
 
 sol! {
     event Swap(
@@ -36,7 +38,6 @@ struct SwapRecord {
     recipient: String,
 }
 
-const POOL_ADDRESS: Address = address!("88e6a0c2ddd26feeb64f039a2c41296fcb3f5640");
 const Q96_STR: &str = "79228162514264337593543950336";
 
 fn calculate_price_in_usdc(sqrt_price_x96: U256) -> BigDecimal {
@@ -64,18 +65,39 @@ fn calculate_price_in_usdc(sqrt_price_x96: U256) -> BigDecimal {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
     dotenv::dotenv().ok();
 
     let rpc_url = env::var("RPC_URL").expect("RPC_URL must be set");
     let csv_path = env::var("OUTPUT_FILE").unwrap_or_else(|_| "swaps.csv".to_string());
 
-    println!("🦄 Starting Uniswap V3 Indexer...");
-    println!("📄 Output: {}", csv_path);
-    println!("🎯 Target Pool: USDC/WETH");
-    println!("📡 Connecting to: {}", rpc_url);
+    let pool_str = env::var("POOL_ADDRESS").unwrap_or_else(|_| "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string());
+    let pool_address = Address::from_str(&pool_str).expect("Invalid pool address");
+    
+    info!("🦄 Uniswap Indexer v0.2 Started");
+    info!("📄 Output: {}", csv_path);
+    info!("🎯 Pool: {:?}", pool_address);
 
-    let file_exists = std::path::Path::new(&csv_path).exists();
-    let file = OpenOptions::new().create(true).append(true).open(&csv_path)?;
+    loop {
+        info!("Connecting to WebSocket...");
+
+        match run_indexer(&rpc_url, pool_address, &csv_path).await {
+            Ok(_) => warn!("⚠️ Connection closed. Reconnecting in 5s..."),
+            Err(e) => error!("❌ Error: {:?}. Reconnecting in 5s...", e),
+        }
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+}
+
+async fn run_indexer(rpc_url: &str, target: Address, csv_path: &str) -> Result<()> {
+
+    let file_exists = std::path::Path::new(csv_path).exists();
+    let file = OpenOptions::new().create(true).append(true).open(csv_path)?;
+
     let mut csv_writer = csv::WriterBuilder::new()
         .has_headers(!file_exists)
         .from_writer(file);
@@ -83,10 +105,10 @@ async fn main() -> Result<()> {
     let ws = WsConnect::new(rpc_url);
     let provider = ProviderBuilder::new().connect_ws(ws).await?;
 
-    println!("✅ Connected! Waiting for Swaps...\n");
+    info!("✅ Connected! Waiting for Swaps...\n");
 
     let filter = Filter::new()
-        .address(POOL_ADDRESS)
+        .address(target)
         .event_signature(Swap::SIGNATURE_HASH);
 
     let sub = provider.subscribe_logs(&filter).await?;
@@ -100,7 +122,6 @@ async fn main() -> Result<()> {
             let eth_price = calculate_price_in_usdc(U256::from(data.sqrtPriceX96));
 
             let price_display = eth_price.with_scale(2);
-
             let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
             let record = SwapRecord {
@@ -113,11 +134,11 @@ async fn main() -> Result<()> {
             };
 
             if let Err(e) = csv_writer.serialize(&record) {
-                eprintln!("❌ CSV Error: {:?}", e);
+                error!("❌ CSV Error: {:?}", e);
             }
             csv_writer.flush()?;
 
-            println!(
+            info!(
                 "[{}] 🔄 Price: ${} | Tx: {:?}",
                 now, price_display, tx_hash
             );   

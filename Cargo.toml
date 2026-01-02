@@ -4,17 +4,27 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Alloy
 alloy = { version = "1.2.1", features = ["full"] }
+
+# Async
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
+
+# Utils
 eyre = "0.6"
 dotenv = "0.15"
 
+# Serialize
 serde = { version = "1.0", features = ["derive"] }
 csv = "1.3"
 chrono = "0.4"
 
-# Профессиональная математика
+# Math
 bigdecimal = "0.4.10"
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
+
+# Logging
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"]}
