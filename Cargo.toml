@@ -28,3 +28,7 @@ num-traits = "0.2.19"
 # Logging
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"]}
+
+# ClickHouse
+clickhouse = { version = "0.14.1", features = ["lz4"]}
+url = "2.5.7"
